@@ -1,0 +1,123 @@
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
+using System.Windows.Forms;
+
+namespace ImageInfoReader
+{
+    public class Form1 : Form
+    {
+        private Button btnSelectFolder;
+        private DataGridView dataGridView1;
+        private FolderBrowserDialog folderBrowserDialog1;
+
+        public Form1()
+        {
+            InitializeComponent();
+        }
+
+        private void InitializeComponent()
+        {
+            this.btnSelectFolder = new Button();
+            this.dataGridView1 = new DataGridView();
+            this.folderBrowserDialog1 = new FolderBrowserDialog();
+            ((System.ComponentModel.ISupportInitialize)(this.dataGridView1)).BeginInit();
+            this.SuspendLayout();
+
+            btnSelectFolder.Location = new Point(20, 20);
+            btnSelectFolder.Size = new Size(160, 30);
+            btnSelectFolder.Text = "Select Folder";
+            btnSelectFolder.Click += BtnSelectFolder_Click;
+
+            dataGridView1.Location = new Point(20, 70);
+            dataGridView1.Size = new Size(850, 400);
+            dataGridView1.ColumnCount = 5;
+            dataGridView1.Columns[0].Name = "FileName";
+            dataGridView1.Columns[1].Name = "ImageSize(px)";
+            dataGridView1.Columns[2].Name = "DPI";
+            dataGridView1.Columns[3].Name = "BitDepth";
+            dataGridView1.Columns[4].Name = "Compression";
+
+            this.ClientSize = new Size(900, 500);
+            this.Text = "Image Information Reader";
+            this.Controls.Add(btnSelectFolder);
+            this.Controls.Add(dataGridView1);
+
+            ((System.ComponentModel.ISupportInitialize)(dataGridView1)).EndInit();
+            this.ResumeLayout(false);
+        }
+
+        private void BtnSelectFolder_Click(object sender, EventArgs e)
+        {
+            if (folderBrowserDialog1.ShowDialog() == DialogResult.OK)
+            {
+                dataGridView1.Rows.Clear();
+                string[] supportedMask = { "*.jpg", "*.jpeg", "*.gif", "*.tif", "*.tiff", "*.bmp", "*.png", "*.pcx" };
+                foreach (string mask in supportedMask)
+                {
+                    string[] files = Directory.GetFiles(folderBrowserDialog1.SelectedPath, mask);
+                    foreach (string file in files)
+                    {
+                        ReadImageInfo(file);
+                    }
+                }
+            }
+        }
+
+        private void ReadImageInfo(string filePath)
+        {
+            try
+            {
+                string fileName = Path.GetFileName(filePath);
+                string ext = Path.GetExtension(filePath).ToLower();
+
+                if (ext == ".pcx")
+                {
+                    dataGridView1.Rows.Add(fileName, "PCX Image", "Unknown", "Unknown", "PCX compression");
+                    return;
+                }
+
+                using (Image img = Image.FromFile(filePath))
+                {
+                    string sizeText = img.Width + " × " + img.Height;
+                    string dpiText = Math.Round(img.HorizontalResolution, 2) + " / " + Math.Round(img.VerticalResolution, 2);
+                    int bitDepth = GetBitDepth(img);
+                    string compressText = GetCompressionType(img, ext);
+
+                    dataGridView1.Rows.Add(fileName, sizeText, dpiText, bitDepth, compressText);
+                }
+            }
+            catch
+            {
+                dataGridView1.Rows.Add(Path.GetFileName(filePath), "Read failed", "-", "-", "-");
+            }
+        }
+
+        // Get color bit depth
+        private int GetBitDepth(Image img)
+        {
+            PixelFormat pf = img.PixelFormat;
+            if (pf == PixelFormat.Format1bppIndexed) return 1;
+            if (pf == PixelFormat.Format4bppIndexed) return 4;
+            if (pf == PixelFormat.Format8bppIndexed) return 8;
+            if (pf == PixelFormat.Format16bppGrayScale || pf == PixelFormat.Format16bppRgb555 || pf == PixelFormat.Format16bppRgb565) return 16;
+            if (pf == PixelFormat.Format24bppRgb) return 24;
+            if (pf == PixelFormat.Format32bppArgb || pf == PixelFormat.Format32bppPArgb || pf == PixelFormat.Format32bppRgb) return 32;
+            if (pf == PixelFormat.Format48bppRgb) return 48;
+            if (pf == PixelFormat.Format64bppArgb) return 64;
+            return 0;
+        }
+
+        // Get compression algorithm
+        private string GetCompressionType(Image img, string ext)
+        {
+            if (ext == ".jpg" || ext == ".jpeg") return "JPEG lossy";
+            if (ext == ".gif") return "LZW lossless";
+            if (ext == ".png") return "DEFLATE lossless";
+            if (ext == ".tif" || ext == ".tiff") return "TIFF various";
+            if (ext == ".bmp") return "No compression";
+            return "Unknown";
+        }
+    }
+}
