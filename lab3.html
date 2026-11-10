@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Лабораторная работа 3 | Вариант 6</title>
+    <script src="https://docs.opencv.org/4.x/opencv.js"></script>
+    <style>
+        * {box-sizing: border-box;font-family: Arial, sans-serif;}
+        body {padding:20px;max-width:1200px;margin:0 auto;background:#f3f4f6;}
+        h1 {text-align:center;color:#222;font-size:22px;}
+        .panel {background:#fff;padding:16px;border-radius:10px;margin-bottom:16px;box-shadow:0 2px 8px #00000018;}
+        .row {display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:8px 0;}
+        canvas {border:1px solid #999;background:#fff;max-width:500px;}
+        button, select, input {padding:7px 12px;font-size:14px;cursor:pointer;}
+        label {margin-right:8px;}
+        .canvas-wrap {display:flex;gap:20px;flex-wrap:wrap;justify-content:center;margin-top:10px;}
+        .canvas-box {text-align:center;}
+        .info {color:#555;font-size:13px;margin:6px 0;}
+    </style>
+</head>
+<body>
+    <h1>Лабораторная работа 3. Вариант 6<br>Линейное контрастирование + Глобальная и адаптивная пороговая обработка</h1>
+
+    <div class="panel">
+        <div class="row">
+            <input type="file" id="fileInput" accept="image/*">
+            <button id="btnSave">Сохранить результат</button>
+        </div>
+        <div class="row">
+            <select id="methodSelect">
+                <option value="contrast">Линейное контрастирование</option>
+                <option value="globalFixed">Глобальный фиксированный порог</option>
+                <option value="globalOtsu">Глобальный порог Оцу (Otsu)</option>
+                <option value="adaptive">Адаптивная пороговая обработка</option>
+            </select>
+            <div id="paramFixed">
+                <label>Порог: <input type="range" id="thrVal" min="0" max="255" value="127"> <span id="thrText">127</span></label>
+            </div>
+            <div id="paramAdaptive" style="display:none;">
+                <label>Размер блока: <input type="number" id="blockSz" value="15" min="3" max="51" step="2"></label>
+                <label>C: <input type="number" id="cVal" value="4" min="-20" max="20"></label>
+            </div>
+        </div>
+        <div class="info">Статус: <span id="status">Загрузка OpenCV...</span></div>
+    </div>
+
+    <div class="canvas-wrap">
+        <div class="canvas-box">
+            <h4>Исходное изображение</h4>
+            <canvas id="canvasSrc"></canvas>
+        </div>
+        <div class="canvas-box">
+            <h4>Результат обработки</h4>
+            <canvas id="canvasDst"></canvas>
+        </div>
+    </div>
+
+<script>
+let cvReady = false;
+let srcMat = null;
+let dstMat = null;
+let imgLoaded = false;
+const canvasSrc = document.getElementById('canvasSrc');
+const canvasDst = document.getElementById('canvasDst');
+const ctxSrc = canvasSrc.getContext('2d');
+const ctxDst = canvasDst.getContext('2d');
+const fileInput = document.getElementById('fileInput');
+const methodSelect = document.getElementById('methodSelect');
+const thrVal = document.getElementById('thrVal');
+const thrText = document.getElementById('thrText');
+const blockSz = document.getElementById('blockSz');
+const cVal = document.getElementById('cVal');
+const paramFixed = document.getElementById('paramFixed');
+const paramAdaptive = document.getElementById('paramAdaptive');
+const status = document.getElementById('status');
+const btnSave = document.getElementById('btnSave');
+
+cv['onRuntimeInitialized'] = ()=>{
+    cvReady = true;
+    status.textContent = "OpenCV готов, загрузите изображение";
+};
+
+thrVal.oninput = ()=>{ thrText.textContent = thrVal.value; runProcess(); };
+methodSelect.onchange = ()=>{
+    const m = methodSelect.value;
+    paramFixed.style.display = m==='globalFixed' ? 'block' : 'none';
+    paramAdaptive.style.display = m==='adaptive' ? 'block' : 'none';
+    runProcess();
+};
+blockSz.oninput = runProcess;
+cVal.oninput = runProcess;
+
+fileInput.onchange = async (e)=>{
+    const f = e.target.files[0];
+    if(!f) return;
+    const img = new Image();
+    img.src = URL.createObjectURL(f);
+    await new Promise(r=>img.onload=r);
+    canvasSrc.width = img.width; canvasSrc.height = img.height;
+    ctxSrc.drawImage(img,0,0);
+    if(srcMat) srcMat.delete();
+    srcMat = cv.imread(canvasSrc);
+    imgLoaded = true;
+    runProcess();
+    status.textContent = "Изображение загружено";
+};
+
+btnSave.onclick = ()=>{
+    const link = document.createElement('a');
+    link.href = canvasDst.toDataURL("image/png");
+    link.download = "result_lab6.png";
+    link.click();
+};
+
+function runProcess(){
+    if(!cvReady || !imgLoaded || !srcMat) return;
+    if(dstMat) dstMat.delete();
+    dstMat = new cv.Mat();
+    const gray = new cv.Mat();
+    cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY);
+    const m = methodSelect.value;
+
+    switch(m){
+        case 'contrast':
+            // Линейное контрастирование
+            cv.normalize(gray, dstMat, 0, 255, cv.NORM_MINMAX, cv.CV_8U);
+            break;
+        case 'globalFixed':
+            const t = Number(thrVal.value);
+            cv.threshold(gray, dstMat, t, 255, cv.THRESH_BINARY);
+            break;
+        case 'globalOtsu':
+            cv.threshold(gray, dstMat, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+            break;
+        case 'adaptive':
+            let bs = Number(blockSz.value);
+            if(bs%2===0) bs+=1;
+            const C = Number(cVal.value);
+            cv.adaptiveThreshold(gray, dstMat, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, bs, C);
+            break;
+    }
+    cv.imshow(canvasDst, dstMat);
+    gray.delete();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Computer Graphics Lab 5: Clipping Algorithms</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #sidebar {
+            width: 320px;
+            background-color: #252526;
+            padding: 15px;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            overflow-y: auto;
+        }
+        #canvas-container {
+            flex-grow: 1;
+            position: relative;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+        h2 { font-size: 16px; margin: 0 0 10px 0; color: #4fc1ff; }
+        .panel { background: #1e1e1e; padding: 10px; border-radius: 5px; border: 1px solid #333; }
+        button {
+            background-color: #0e639c; color: white; border: none; padding: 8px;
+            width: 100%; cursor: pointer; border-radius: 3px; margin-bottom: 5px;
+            font-weight: bold;
+        }
+        button:hover { background-color: #1177bb; }
+        .stat { font-family: monospace; font-size: 13px; margin: 2px 0; }
+        .stat span { color: #b5cea8; }
+        label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <div class="panel">
+        <h2>🎛️ 控制面板 (Controls)</h2>
+        <button id="btn-gen">生成测试数据 (含边界/退化)</button>
+        <button id="btn-benchmark">生成 50,000 条线段 (压力测试)</button>
+        <button id="btn-clear">清空画布</button>
+        <label><input type="checkbox" id="chk-aabb" checked> 启用 AABB 快速预过滤</label>
+        <label><input type="checkbox" id="chk-poly" checked> 显示多边形裁剪示例</label>
+    </div>
+
+    <div class="panel">
+        <h2>📊 算法性能统计 (Ops)</h2>
+        <div class="stat">Sutherland-Cohen: <span id="sc-ops">0</span> ops</div>
+        <div class="stat">Liang-Barsky: <span id="lb-ops">0</span> ops</div>
+    </div>
+
+    <div class="panel">
+        <h2>📐 交互说明</h2>
+        <div style="font-size: 12px; line-height: 1.5;">
+            • <b>拖拽蓝色窗口边缘</b>：移动/缩放窗口<br>
+            • <b>滚轮</b>：缩放视图<br>
+            • 红色：被裁剪掉的线段<br>
+            • 绿色：保留下来的可见部分<br>
+        </div>
+    </div>
+</div>
+
+<div id="canvas-container">
+    <canvas id="canvas"></canvas>
+</div>
+
+<script>
+// ==========================================
+// 1. 鲁棒性工具 (Robustness & Epsilon)
+// ==========================================
+const EPSILON = 1e-7;
+const isEqual = (a, b) => Math.abs(a - b) < EPSILON;
+const isLess = (a, b) => a < b - EPSILON;
+const isGreater = (a, b) => a > b + EPSILON;
+
+// 运算计数器
+let ops = { sc: { mul: 0, div: 0 }, lb: { mul: 0, div: 0 } };
+
+// ==========================================
+// 2. 基础几何体与渲染设置
+// ==========================================
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let width, height;
+let viewOffset = { x: 0, y: 0 };
+let viewScale = 1;
+
+function resize() {
+    width = canvas.width = canvas.parentElement.clientWidth;
+    height = canvas.height = canvas.parentElement.clientHeight;
+    draw();
+}
+window.addEventListener('resize', resize);
+
+// 裁剪窗口 (World Space)
+let clipWindow = { xmin: -200, ymin: -150, xmax: 200, ymax: 150 };
+let isDragging = false;
+let dragType = null;
+let lastMouse = { x: 0, y: 0 };
+
+// 坐标转换
+function worldToScreen(x, y) {
+    return {
+        x: (x + viewOffset.x) * viewScale + width / 2,
+        y: -(y + viewOffset.y) * viewScale + height / 2
+    };
+}
+function screenToWorld(x, y) {
+    return {
+        x: (x - width / 2) / viewScale - viewOffset.x,
+        y: -(y - height / 2) / viewScale - viewOffset.y
+    };
+}
+
+// ==========================================
+// 3. 算法核心
+// ==========================================
+
+// AABB 快速拒绝 (Bitmask)
+function isAABBOutside(x1, y1, x2, y2, win) {
+    if (isLess(Math.max(x1, x2), win.xmin) || isGreater(Math.min(x1, x2), win.xmax) ||
+        isLess(Math.max(y1, y2), win.ymin) || isGreater(Math.min(y1, y2), win.ymax)) {
+        return true;
+    }
+    return false;
+}
+
+// -- Sutherland-Cohen --
+const INSIDE = 0; const LEFT = 1; const RIGHT = 2; const BOTTOM = 4; const TOP = 8;
+function computeCode(x, y, win) {
+    let code = INSIDE;
+    if (isLess(x, win.xmin)) code |= LEFT;
+    else if (isGreater(x, win.xmax)) code |= RIGHT;
+    if (isLess(y, win.ymin)) code |= BOTTOM;
+    else if (isGreater(y, win.ymax)) code |= TOP;
+    return code;
+}
+
+function sutherlandCohen(x1, y1, x2, y2, win) {
+    ops.sc.mul = 0; ops.sc.div = 0;
+    let code1 = computeCode(x1, y1, win);
+    let code2 = computeCode(x2, y2, win);
+    let accept = false;
+
+    while (true) {
+        if ((code1 === 0) && (code2 === 0)) { accept = true; break; }
+        else if ((code1 & code2) !== 0) { break; }
+        else {
+            let codeOut = code1 !== 0 ? code1 : code2;
+            let x, y;
+            if (codeOut & TOP) {
+                x = x1 + (x2 - x1) * (win.ymax - y1) / (y2 - y1); ops.sc.mul++; ops.sc.div++;
+                y = win.ymax;
+            } else if (codeOut & BOTTOM) {
+                x = x1 + (x2 - x1) * (win.ymin - y1) / (y2 - y1); ops.sc.mul++; ops.sc.div++;
+                y = win.ymin;
+            } else if (codeOut & RIGHT) {
+                y = y1 + (y2 - y1) * (win.xmax - x1) / (x2 - x1); ops.sc.mul++; ops.sc.div++;
+                x = win.xmax;
+            } else if (codeOut & LEFT) {
+                y = y1 + (y2 - y1) * (win.xmin - x1) / (x2 - x1); ops.sc.mul++; ops.sc.div++;
+                x = win.xmin;
+            }
+            if (codeOut === code1) { x1 = x; y1 = y; code1 = computeCode(x1, y1, win); }
+            else { x2 = x; y2 = y; code2 = computeCode(x2, y2, win); }
+        }
+    }
+    if (accept) return { x1, y1, x2, y2 };
+    return null;
+}
+
+// -- Liang-Barsky --
+function liangBarsky(x1, y1, x2, y2, win) {
+    ops.lb.mul = 0; ops.lb.div = 0;
+    let dx = x2 - x1, dy = y2 - y1;
+    let p = [-dx, dx, -dy, dy];
+    let q = [x1 - win.xmin, win.xmax - x1, y1 - win.ymin, win.ymax - y1];
+    let u1 = 0.0, u2 = 1.0;
+
+    for (let i = 0; i < 4; i++) {
+        if (isEqual(p[i], 0)) {
+            if (isLess(q[i], 0)) return null; // 平行且在窗口外
+        } else {
+            let r = q[i] / p[i]; ops.lb.div++; // 除法统计
+            if (isLess(p[i], 0)) {
+                if (isGreater(r, u2)) return null;
+                if (isGreater(r, u1)) u1 = r;
+            } else {
+                if (isLess(r, u1)) return null;
+                if (isLess(r, u2)) u2 = r;
+            }
+        }
+    }
+    // 计算交点 (乘法统计)
+    let nx1 = x1 + u1 * dx; ops.lb.mul++;
+    let ny1 = y1 + u1 * dy; ops.lb.mul++;
+    let nx2 = x1 + u2 * dx; ops.lb.mul++;
+    let ny2 = y1 + u2 * dy; ops.lb.mul++;
+    return { x1: nx1, y1: ny1, x2: nx2, y2: ny2 };
+}
+
+// -- Sutherland-Hodgman (多边形裁剪简化版) --
+function sutherlandHodgman(poly, win) {
+    if (poly.length === 0) return [];
+    let outputList = poly;
+    const edges = [
+        { inside: p => !isLess(p.x, win.xmin), intersect: (p1, p2) => ({ x: win.xmin, y: p1.y + (p2.y - p1.y) * (win.xmin - p1.x) / (p2.x - p1.x) }) },
+        { inside: p => !isGreater(p.x, win.xmax), intersect: (p1, p2) => ({ x: win.xmax, y: p1.y + (p2.y - p1.y) * (win.xmax - p1.x) / (p2.x - p1.x) }) },
+        { inside: p => !isLess(p.y, win.ymin), intersect: (p1, p2) => ({ x: p1.x + (p2.x - p1.x) * (win.ymin - p1.y) / (p2.y - p1.y), y: win.ymin }) },
+        { inside: p => !isGreater(p.y, win.ymax), intersect: (p1, p2) => ({ x: p1.x + (p2.x - p1.x) * (win.ymax - p1.y) / (p2.y - p1.y), y: win.ymax }) }
+    ];
+
+    edges.forEach(edge => {
+        let inputList = outputList;
+        outputList = [];
+        for (let i = 0; i < inputList.length; i++) {
+            let curr = inputList[i];
+            let prev = inputList[(i + inputList.length - 1) % inputList.length];
+            if (edge.inside(curr)) {
+                if (!edge.inside(prev)) outputList.push(edge.intersect(prev, curr));
+                outputList.push(curr);
+            } else if (edge.inside(prev)) {
+                outputList.push(edge.intersect(prev, curr));
+            }
+        }
+    });
+    return outputList;
+}
+
+// ==========================================
+// 4. 数据与渲染
+// ==========================================
+let lines = []; // { x1, y1, x2, y2 }
+let polygon = []; // { x, y }
+let isBenchmarkMode = false;
+
+function generateTestData() {
+    isBenchmarkMode = false;
+    lines = [];
+    // 随机线段
+    for (let i = 0; i < 30; i++) {
+        lines.push({
+            x1: (Math.random() - 0.5) * 800, y1: (Math.random() - 0.5) * 600,
+            x2: (Math.random() - 0.5) * 800, y2: (Math.random() - 0.5) * 600
+        });
+    }
+    // 强制 Corner Cases (边界、退化点)
+    lines.push({ x1: -200, y1: -150, x2: -200, y2: 150 }); // 贴左边
+    lines.push({ x1: 0, y1: 0, x2: 0, y2: 0 }); // 零长度
+    lines.push({ x1: -200, y1: -150, x2: -200, y2: -150 }); // 在顶点上
+
+    // 凹多边形测试
+    polygon = [
+        { x: -100, y: -100 }, { x: 150, y: -100 },
+        { x: 50, y: 0 }, { x: 150, y: 100 },
+        { x: -100, y: 100 }, { x: 0, y: 0 }
+    ];
+    draw();
+}
+
+function generateBenchmark() {
+    isBenchmarkMode = true;
+    lines = [];
+    for (let i = 0; i < 50000; i++) {
+        lines.push({
+            x1: (Math.random() - 0.5) * 4000, y1: (Math.random() - 0.5) * 4000,
+            x2: (Math.random() - 0.5) * 4000, y2: (Math.random() - 0.5) * 4000
+        });
+    }
+    draw();
+}
+
+function draw() {
+    ctx.clearRect(0, 0, width, height);
+    
+    // 画网格坐标系
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    let center = worldToScreen(0, 0);
+    ctx.moveTo(0, center.y); ctx.lineTo(width, center.y);
+    ctx.moveTo(center.x, 0); ctx.lineTo(center.x, height);
+    ctx.stroke();
+
+    const useAABB = document.getElementById('chk-aabb').checked;
+
+    // 绘制线段 (SC 和 LB 同时计算用于统计)
+    let scTotalMul = 0, scTotalDiv = 0, lbTotalMul = 0, lbTotalDiv = 0;
+
+    ctx.lineWidth = isBenchmarkMode ? 0.5 : 1.5;
+
+    lines.forEach(line => {
+        if (useAABB && isAABBOutside(line.x1, line.y1, line.x2, line.y2, clipWindow)) {
+            return; // AABB 过滤
+        }
+
+        // 原始线段（红色/暗红色）
+        const p1 = worldToScreen(line.x1, line.y1);
+        const p2 = worldToScreen(line.x2, line.y2);
+        ctx.strokeStyle = isBenchmarkMode ? 'rgba(255, 0, 0, 0.1)' : 'rgba(255, 0, 0, 0.5)';
+        ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+
+        // 裁剪
+        let resSC = sutherlandCohen(line.x1, line.y1, line.x2, line.y2, clipWindow);
+        let resLB = liangBarsky(line.x1, line.y1, line.x2, line.y2, clipWindow);
+        scTotalMul += ops.sc.mul; scTotalDiv += ops.sc.div;
+        lbTotalMul += ops.lb.mul; lbTotalDiv += ops.lb.div;
+
+        // 绘制裁剪后的线段（绿色）
+        if (resSC) {
+            const cp1 = worldToScreen(resSC.x1, resSC.y1);
+            const cp2 = worldToScreen(resSC.x2, resSC.y2);
+            ctx.strokeStyle = '#00ff00';
+            ctx.beginPath(); ctx.moveTo(cp1.x, cp1.y); ctx.lineTo(cp2.x, cp2.y); ctx.stroke();
+        }
+    });
+
+    document.getElementById('sc-ops').innerText = `Mul: ${scTotalMul}, Div: ${scTotalDiv}`;
+    document.getElementById('lb-ops').innerText = `Mul: ${lbTotalMul}, Div: ${lbTotalDiv}`;
+
+    // 绘制多边形
+    if (document.getElementById('chk-poly').checked && !isBenchmarkMode && polygon.length > 0) {
+        ctx.strokeStyle = '#ffaa00';
+        ctx.beginPath();
+        polygon.forEach((p, i) => {
+            const sp = worldToScreen(p.x, p.y);
+            if (i === 0) ctx.moveTo(sp.x, sp.y); else ctx.lineTo(sp.x, sp.y);
+        });
+        ctx.closePath();
+        ctx.stroke();
+
+        const clippedPoly = sutherlandHodgman(polygon, clipWindow);
+        if (clippedPoly.length > 0) {
+            ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+            ctx.beginPath();
+            clippedPoly.forEach((p, i) => {
+                const sp = worldToScreen(p.x, p.y);
+                if (i === 0) ctx.moveTo(sp.x, sp.y); else ctx.lineTo(sp.x, sp.y);
+            });
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = '#00ff00';
+            ctx.stroke();
+        }
+    }
+
+    // 绘制裁剪窗口 (蓝色)
+    const w1 = worldToScreen(clipWindow.xmin, clipWindow.ymax);
+    const w2 = worldToScreen(clipWindow.xmax, clipWindow.ymin);
+    ctx.strokeStyle = '#4fc1ff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(w1.x, w1.y, w2.x - w1.x, w2.y - w1.y);
+}
+
+// ==========================================
+// 5. 交互事件 (拖拽、缩放)
+// ==========================================
+canvas.addEventListener('mousedown', e => {
+    const world = screenToWorld(e.clientX, e.clientY);
+    const dist = 10 / viewScale; // 吸附范围
+    const inX = world.x > clipWindow.xmin - dist && world.x < clipWindow.xmax + dist;
+    const inY = world.y > clipWindow.ymin - dist && world.y < clipWindow.ymax + dist;
+
+    if (inX && inY) {
+        isDragging = true;
+        lastMouse = { x: e.clientX, y: e.clientY };
+        
+        // 判断是移动还是缩放
+        const nearLeft = Math.abs(world.x - clipWindow.xmin) < dist;
+        const nearRight = Math.abs(world.x - clipWindow.xmax) < dist;
+        const nearTop = Math.abs(world.y - clipWindow.ymax) < dist;
+        const nearBottom = Math.abs(world.y - clipWindow.ymin) < dist;
+        
+        if (nearLeft || nearRight || nearTop || nearBottom) dragType = 'resize';
+        else dragType = 'move';
+    }
+});
+
+canvas.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    const dx = (e.clientX - lastMouse.x) / viewScale;
+    const dy = -(e.clientY - lastMouse.y) / viewScale;
+
+    if (dragType === 'move') {
+        clipWindow.xmin += dx; clipWindow.xmax += dx;
+        clipWindow.ymin += dy; clipWindow.ymax += dy;
+    } else {
+        const dist = 15 / viewScale;
+        const world = screenToWorld(e.clientX, e.clientY);
+        if (Math.abs(world.x - clipWindow.xmin) < dist) clipWindow.xmin += dx;
+        if (Math.abs(world.x - clipWindow.xmax) < dist) clipWindow.xmax += dx;
+        if (Math.abs(world.y - clipWindow.ymax) < dist) clipWindow.ymax += dy;
+        if (Math.abs(world.y - clipWindow.ymin) < dist) clipWindow.ymin += dy;
+    }
+
+    lastMouse = { x: e.clientX, y: e.clientY };
+    draw();
+});
+
+canvas.addEventListener('mouseup', () => isDragging = false);
+
+canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    const mouseWorld = screenToWorld(e.clientX, e.clientY);
+    viewScale *= zoomFactor;
+    const newMouseWorld = screenToWorld(e.clientX, e.clientY);
+    viewOffset.x += mouseWorld.x - newMouseWorld.x;
+    viewOffset.y += mouseWorld.y - newMouseWorld.y;
+    draw();
+}, { passive: false });
+
+// 按钮事件绑定
+document.getElementById('btn-gen').addEventListener('click', generateTestData);
+document.getElementById('btn-benchmark').addEventListener('click', generateBenchmark);
+document.getElementById('btn-clear').addEventListener('click', () => { lines = []; polygon = []; draw(); });
+document.getElementById('chk-aabb').addEventListener('change', draw);
+document.getElementById('chk-poly').addEventListener('change', draw);
+
+// 初始化
+resize();
+generateTestData();
+</script>
+</body>
+</html>

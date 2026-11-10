@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Лабораторная работа 4. Базовые растровые алгоритмы</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 10px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            display:flex; gap:20px;
+        }
+        #canvasField {
+            border:2px solid #222;
+            background: white;
+        }
+        .panel {
+            background:#fff;
+            padding:15px;
+            border-radius:8px;
+            box-shadow: 0 0 4px #aaa;
+            min-width:320px;
+        }
+        .inp-row {
+            margin:8px 0;
+        }
+        input, select, button {
+            padding:6px;
+            font-size:16px;
+        }
+        button {
+            background:#337ab7;
+            color:white;
+            border:none;
+            border-radius:4px;
+            cursor:pointer;
+        }
+        button:hover {background:#286090;}
+        #log {
+            margin-top:12px;
+            border:1px solid #ccc;
+            padding:8px;
+            height:180px;
+            overflow-y:auto;
+            font-size:14px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Лабораторная работа 4. Базовые растровые алгоритмы</h2>
+    <div class="container">
+        <canvas id="canvasField" width="600" height="600"></canvas>
+        <div class="panel">
+            <div class="inp-row">
+                <label>Алгоритм:</label><br>
+                <select id="algoSelect">
+                    <option value="step">Пошаговый алгоритм (отрезок)</option>
+                    <option value="dda">ЦДА (DDA, отрезок)</option>
+                    <option value="bresLine">Брезенхем (отрезок)</option>
+                    <option value="bresCircle">Брезенхем (окружность)</option>
+                </select>
+            </div>
+            <div class="inp-row">
+                <label>X0: <input type="number" id="x0" value="2" size="4"></label>
+                <label>Y0: <input type="number" id="y0" value="2" size="4"></label>
+            </div>
+            <div class="inp-row">
+                <label>X1/R: <input type="number" id="x1" value="10" size="4"></label>
+                <label>Y1: <input type="number" id="y1" value="7" size="4"></label>
+            </div>
+            <div class="inp-row">
+                <label>Масштаб (пикселей на клетку): <input type="number" id="scale" value="30" min="10"></label>
+            </div>
+            <div class="inp-row">
+                <button onclick="drawScene()">Нарисовать</button>
+                <button onclick="clearCanvas()">Очистить</button>
+            </div>
+            <div id="log"></div>
+        </div>
+    </div>
+
+<script>
+const canvas = document.getElementById("canvasField");
+const ctx = canvas.getContext("2d");
+const logDiv = document.getElementById("log");
+
+function log(text){
+    logDiv.innerHTML += text + "<br>";
+    logDiv.scrollTop = logDiv.scrollHeight;
+}
+function clearLog(){logDiv.innerHTML="";}
+
+// Рисуем сетку, оси координат
+function drawGrid(scale){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const size = canvas.width;
+    const center = size/2;
+    
+    // Сетка (серые линии)
+    ctx.strokeStyle="#ddd";
+    ctx.lineWidth = 1;
+    for(let x=0;x<=size;x+=scale){
+        ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,size);ctx.stroke();
+    }
+    for(let y=0;y<=size;y+=scale){
+        ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(size,y);ctx.stroke();
+    }
+    
+    // Оси X,Y (красный)
+    ctx.strokeStyle="#f33";
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(0, center); ctx.lineTo(size, center); // OX
+    ctx.moveTo(center, 0); ctx.lineTo(center, size); // OY
+    ctx.stroke();
+    ctx.lineWidth=1;
+    
+    // Подписи осей
+    ctx.fillStyle="#f33";
+    ctx.font = "bold 14px Arial";
+    ctx.fillText("X", size-15, center - 8);
+    ctx.fillText("Y", center + 8, 15);
+    ctx.fillText("O", center - 15, center + 15);
+    
+    // Диагонали y=x и y=-x (синий пунктир)
+    ctx.strokeStyle = "#3366ff";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(size, size);
+    ctx.moveTo(0, size);
+    ctx.lineTo(size, 0);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    
+    // Подписи диагоналей
+    ctx.fillStyle = "#3366ff";
+    ctx.font = "12px Arial";
+    ctx.fillText("y=x", size - 50, size - 50);
+    ctx.fillText("y=-x", size - 50, 50);
+    
+    // Числовые подписи на осях (каждая клетка = 1)
+    ctx.fillStyle = "#333";
+    ctx.font = "11px Arial";
+    
+    // X-ось: подписи справа от центра (положительные)
+    for(let i=1; center + i*scale < size - 10; i++){
+        const px = center + i*scale;
+        ctx.fillText(i, px - 3, center + 18);
+    }
+    // X-ось: подписи слева от центра (отрицательные)
+    for(let i=-1; center + i*scale > 10; i--){
+        const px = center + i*scale;
+        ctx.fillText(i, px - 3, center + 18);
+    }
+    
+    // Y-ось: подписи выше центра (положительные)
+    for(let i=1; center - i*scale > 10; i++){
+        const py = center - i*scale;
+        ctx.fillText(i, center + 8, py + 4);
+    }
+    // Y-ось: подписи ниже центра (отрицательные)
+    for(let i=-1; center - i*scale < size - 10; i--){
+        const py = center - i*scale;
+        ctx.fillText(i, center + 8, py + 4);
+    }
+}
+
+// Поставить пиксель в сетке
+function setPixel(x,y, scale, color="#000"){
+    const cx = canvas.width/2 + x*scale;
+    const cy = canvas.height/2 - y*scale;
+    ctx.fillStyle = color;
+    ctx.fillRect(cx, cy, scale-1, scale-1);
+}
+
+// 1. Пошаговый алгоритм отрезка
+function stepAlgorithm(x0,y0,x1,y1,scale){
+    const startTime = performance.now();
+    let dx = x1-x0;
+    let dy = y1-y0;
+    let m = dy/dx;
+    let points = [];
+    let x = x0;
+    let y = y0;
+    points.push({x,y});
+    while(x<x1){
+        x += 1;
+        y = y0 + Math.round(m*(x-x0));
+        points.push({x,y});
+    }
+    for(let p of points) setPixel(p.x, p.y, scale, "#0066cc");
+    const time = performance.now()-startTime;
+    log(`<b>Пошаговый алгоритм:</b> точек=${points.length}, время=${time.toFixed(4)} мс`);
+    return {points, time};
+}
+
+//2. ЦДА (DDA)
+function ddaAlgorithm(x0,y0,x1,y1,scale){
+    const startTime = performance.now();
+    let dx = x1-x0;
+    let dy = y1-y0;
+    let steps = Math.max(Math.abs(dx), Math.abs(dy));
+    let xInc = dx/steps;
+    let yInc = dy/steps;
+    let x = x0;
+    let y = y0;
+    let points=[];
+    for(let i=0;i<=steps;i++){
+        points.push({x:Math.round(x), y:Math.round(y)});
+        x += xInc;
+        y += yInc;
+    }
+    for(let p of points) setPixel(p.x,p.y,scale,"#00aa44");
+    const time = performance.now()-startTime;
+    log(`<b>ЦДА (DDA):</b> точек=${points.length}, время=${time.toFixed(4)} мс`);
+    return {points, time};
+}
+
+//3. Брезенхем линия
+function bresenhamLine(x0,y0,x1,y1,scale){
+    const startTime = performance.now();
+    let dx = Math.abs(x1-x0);
+    let dy = Math.abs(y1-y0);
+    let sx = x0<x1 ? 1 : -1;
+    let sy = y0<y1 ? 1 : -1;
+    let err = dx-dy;
+    let x=x0,y=y0;
+    let points=[];
+    while(true){
+        points.push({x,y});
+        if(x===x1 && y===y1) break;
+        let e2 = 2*err;
+        if(e2 > -dy) {err -= dy; x += sx;}
+        if(e2 < dx) {err += dx; y += sy;}
+    }
+    for(let p of points) setPixel(p.x,p.y,scale,"#aa33dd");
+    const time = performance.now()-startTime;
+    log(`<b>Брезенхем (отрезок):</b> точек=${points.length}, время=${time.toFixed(4)} мс`);
+    return {points, time};
+}
+
+//4. Брезенхем окружность (xc,yc центр, r радиус)
+function bresenhamCircle(xc,yc,r,scale){
+    const startTime = performance.now();
+    let x=0, y=r;
+    let d = 3 - 2*r;
+    let points=[];
+    while(x<=y){
+        points.push({x:xc+x, y:yc+y});
+        points.push({x:xc+y, y:yc+x});
+        points.push({x:xc+y, y:yc-x});
+        points.push({x:xc+x, y:yc-y});
+        points.push({x:xc-x, y:yc-y});
+        points.push({x:xc-y, y:yc-x});
+        points.push({x:xc-y, y:yc+x});
+        points.push({x:xc-x, y:yc+y});
+        if(d<0) d += 4*x +6;
+        else {d +=4*(x-y)+10; y--;}
+        x++;
+    }
+    for(let p of points) setPixel(p.x,p.y,scale,"#dd4422");
+    const time = performance.now()-startTime;
+    log(`<b>Брезенхем (окружность):</b> точек=${points.length}, время=${time.toFixed(4)} мс`);
+    return {points, time};
+}
+
+function drawScene(){
+    clearLog();
+    const scale = Number(document.getElementById("scale").value);
+    const x0 = Number(document.getElementById("x0").value);
+    const y0 = Number(document.getElementById("y0").value);
+    const x1 = Number(document.getElementById("x1").value);
+    const y1 = Number(document.getElementById("y1").value);
+    const algo = document.getElementById("algoSelect").value;
+    drawGrid(scale);
+    switch(algo){
+        case "step": stepAlgorithm(x0,y0,x1,y1,scale); break;
+        case "dda": ddaAlgorithm(x0,y0,x1,y1,scale); break;
+        case "bresLine": bresenhamLine(x0,y0,x1,y1,scale); break;
+        case "bresCircle": bresenhamCircle(x0,y0,x1,scale); break;
+    }
+}
+function clearCanvas(){
+    clearLog();
+    const scale = Number(document.getElementById("scale").value);
+    drawGrid(scale);
+}
+drawScene();
+</script>
+</body>
+</html>

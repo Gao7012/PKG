@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Лабораторная работа 2 | Чтение информации из графических файлов</title>
+<script src="https://cdn.jsdelivr.net/npm/exifreader@4.13.0/dist/exif-reader.min.js"></script>
+<style>
+*{box-sizing:border-box;font-family:Arial,sans-serif;}
+body{padding:20px;max-width:1450px;margin:0 auto;background:#f1f3f5;}
+h1{text-align:center;font-size:22px;color:#222;}
+.panel{background:#fff;padding:16px;border-radius:10px;margin-bottom:16px;box-shadow:0 2px 8px #00000015;}
+.ctrl-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:8px 0;}
+button,input{padding:8px 14px;font-size:14px;cursor:pointer;}
+#dropZone{border:2px dashed #777;border-radius:8px;padding:24px;text-align:center;margin:10px 0;background:#fafafa;}
+#dropZone.active{border-color:#2563eb;background:#eef6ff;}
+table{width:100%;border-collapse:collapse;margin-top:10px;}
+th,td{border:1px solid #ccc;padding:7px;text-align:left;font-size:13px;vertical-align:top;}
+th{background:#e9ecef;}
+.info-block{margin-top:12px;font-size:13px;color:#333;line-height:1.6;}
+#status{color:#444;margin:6px 0;}
+</style>
+</head>
+<body>
+<h1>Лабораторная работа 2<br>Чтение информации из графических файлов</h1>
+
+<div class="panel">
+    <div class="ctrl-row">
+        <label>Выбрать папку:</label>
+        <input type="file" id="folderInput" webkitdirectory multiple accept="image/*">
+        <button id="clearBtn">Очистить таблицу</button>
+        <button id="exportBtn">Экспорт CSV</button>
+    </div>
+    <div id="dropZone">Перетащите папку / изображения сюда (лимит: 10000 файлов)</div>
+    <div id="status">Ожидается выбор папки</div>
+</div>
+
+<div class="panel">
+    <h3>Результаты сканирования</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>№</th>
+                <th>Имя файла</th>
+                <th>Размер (ширина × высота, px)</th>
+                <th>Разрешение DPI</th>
+                <th>Глубина цвета (бит)</th>
+                <th>Сжатие</th>
+                <th>Дополнительная информация</th>
+            </tr>
+        </thead>
+        <tbody id="resultBody"></tbody>
+    </table>
+</div>
+
+<div class="panel">
+    <h3>📄 Документация и пояснения к характеристикам</h3>
+    <div class="info-block">
+        <p><b>Имя файла</b> — исходное имя файла, полученное из объекта File браузера.</p>
+        <p><b>Размер изображения (пиксели)</b> — ширина и высота растрового изображения. Берётся из заголовка файла/EXIF-метаданных.</p>
+        <p><b>DPI (dot/inch)</b> — физическое разрешение для печати, хранится в EXIF. Если отсутствует — «не указано».</p>
+        <p><b>Глубина цвета</b> — количество бит на пиксель, определяет максимальное число цветов изображения. Из заголовка/EXIF.</p>
+        <p><b>Сжатие</b> — алгоритм сжатия: JPEG (потеря), PNG (Deflate без потерь), PCX (RLE), TIFF (разные методы), BMP без сжатия.</p>
+        <p><b>Дополнительная информация (доп. баллы):</b><br>
+        • JPEG: наличие квантовой таблицы;<br>
+        • GIF: количество цветов в палитре;<br>
+        • PCX: версия формата, число цветовых плоскостей.</p>
+        <br>
+        <p><b>Использованная внешняя библиотека:</b> ExifReader.js (чтение EXIF, IPTC, метаданных JPG, PNG, GIF, TIFF, BMP).<br>
+        Формат PCX парсится вручную через чтение 128-байтного заголовка бинарного файла, библиотека не поддерживает PCX нативно.</p>
+        <p><b>Поддерживаемые форматы:</b> jpg, gif, tif, bmp, png, pcx.</p>
+    </div>
+</div>
+
+<script>
+const resultBody = document.getElementById('resultBody');
+const folderInput = document.getElementById('folderInput');
+const dropZone = document.getElementById('dropZone');
+const status = document.getElementById('status');
+const clearBtn = document.getElementById('clearBtn');
+const exportBtn = document.getElementById('exportBtn');
+
+let rowCount = 0;
+let csvRows = [];
+const MAX_FILES = 10000;
+
+dropZone.ondragover = e => {e.preventDefault(); dropZone.classList.add('active');};
+dropZone.ondragleave = ()=> dropZone.classList.remove('active');
+dropZone.ondrop = e => {
+    e.preventDefault(); dropZone.classList.remove('active');
+    handleFiles(e.dataTransfer.files);
+};
+folderInput.onchange = e => handleFiles(e.target.files);
+clearBtn.onclick = ()=>{resultBody.innerHTML='';rowCount=0;csvRows=[];status.textContent="Таблица очищена";};
+exportBtn.onclick = ()=>{
+    const csv = "№,Имя файла,Размер,DPI,Глубина цвета,Сжатие,Доп. инфо\n"+csvRows.join('\n');
+    const blob = new Blob([csv],{type:'text/csv;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download="lab2_result.csv";
+    a.click();
+};
+
+async function handleFiles(fileList){
+    const files = Array.from(fileList).filter(f=>/.(jpg|jpeg|gif|tif|tiff|bmp|png|pcx)$/i.test(f.name));
+    if(files.length>MAX_FILES){
+        status.textContent = `Ограничение: максимум ${MAX_FILES} файлов, выбрано ${files.length}`;
+        return;
+    }
+    status.textContent = `Обработка ${files.length} файлов...`;
+    for(const f of files){
+        await processOneFile(f);
+    }
+    status.textContent = `Готово. Обработано ${files.length} файлов`;
+}
+
+// Ручной парсер заголовка PCX (128 байт)
+async function parsePCX(file){
+    const buf = await file.arrayBuffer();
+    const view = new DataView(buf);
+    const h = {};
+    h.manufacturer = view.getUint8(0);
+    h.version = view.getUint8(1);
+    h.encoding = view.getUint8(2); // 1 = RLE
+    h.bitsPerPixel = view.getUint8(3);
+    h.xmin = view.getUint16(4,true);
+    h.ymin = view.getUint16(6,true);
+    h.xmax = view.getUint16(8,true);
+    h.ymax = view.getUint16(10,true);
+    h.width = h.xmax - h.xmin + 1;
+    h.height = h.ymax - h.ymin + 1;
+    h.dpiX = view.getUint16(12,true);
+    h.dpiY = view.getUint16(14,true);
+    h.planes = view.getUint8(65);
+    h.bitsTotal = h.planes * h.bitsPerPixel;
+    return {
+        w:h.width, h:h.height,
+        dpi: `${h.dpiX}/${h.dpiY}`,
+        bpp: h.bitsTotal,
+        compression: "RLE (без потерь)",
+        extra: `Версия PCX:${h.version}, плоскостей:${h.planes}`
+    };
+}
+
+async function processOneFile(file){
+    const name = file.name;
+    const ext = name.split('.').pop().toLowerCase();
+    let data = {w:"-",h:"-",dpi:"не указано",bpp:"-",compression:"-",extra:""};
+
+    if(ext==='pcx'){
+        data = await parsePCX(file);
+    }else{
+        try{
+            const buf = await file.arrayBuffer();
+            const meta = ExifReader.load(buf);
+            const img = new Image();
+            const url = URL.createObjectURL(file);
+            await new Promise(r=>{img.onload=r;img.src=url;});
+            URL.revokeObjectURL(url);
+            data.w = img.width; data.h = img.height;
+
+            if(meta.XResolution) data.dpi = meta.XResolution.value;
+            if(meta.BitsPerSample){
+                const arr = meta.BitsPerSample.value;
+                data.bpp = arr.reduce((a,b)=>a+b,0);
+            }
+            if(ext==='jpg'||ext==='jpeg'){
+                data.compression = "JPEG (с потерями)";
+                data.extra = meta.QuantizationTable ? "Присутствует квантовая матрица" : "Квантовая матрица отсутствует";
+            }else if(ext==='png'){
+                data.compression = "Deflate (без потерь)";
+            }else if(ext==='gif'){
+                data.compression = "LZW (без потерь)";
+                data.extra = meta.ColorMap ? `Цветов в палитре: ${meta.ColorMap.value.length}` : "палитра не найдена";
+            }else if(ext==='tif'||ext==='tiff'){
+                const comp = meta.Compression?.value;
+                data.compression = comp ? `TIFF компрессия ${comp}` : "TIFF без сжатия";
+            }else if(ext==='bmp'){
+                data.compression = "BMP без сжатия";
+            }
+        }catch(e){
+            data.extra = "Ошибка чтения метаданных";
+        }
+    }
+    rowCount++;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td>${rowCount}</td>
+        <td>${name}</td>
+        <td>${data.w} × ${data.h}</td>
+        <td>${data.dpi}</td>
+        <td>${data.bpp}</td>
+        <td>${data.compression}</td>
+        <td>${data.extra}</td>
+    `;
+    resultBody.appendChild(tr);
+    csvRows.push(`${rowCount},"${name}","${data.w}×${data.h}","${data.dpi}","${data.bpp}","${data.compression}","${data.extra}"`);
+}
+</script>
+</body>
+</html>

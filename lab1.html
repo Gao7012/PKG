@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Лабораторная работа 1 | Вариант 8 RGB ↔ XYZ ↔ HSV</title>
+<style>
+*{box-sizing:border-box;font-family:Arial,sans-serif;}
+body{max-width:1200px;margin:0 auto;padding:24px;background:#f2f4f7;}
+h1{text-align:center;font-size:22px;}
+.panel{background:#ffffff;padding:18px;border-radius:10px;margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,0.1);}
+.flex-row{display:flex;gap:24px;flex-wrap:wrap;}
+.model-block{flex:1;min-width:280px;}
+h3{margin-top:0;color:#222;}
+.row{margin:10px 0;display:flex;align-items:center;gap:8px;}
+label{width:45px;}
+input[type="range"]{flex-grow:1;}
+input[type="number"]{width:70px;padding:4px;}
+#colorPreview{width:140px;height:140px;border:2px solid #888;border-radius:8px;margin:10px 0;}
+#warningBox{color:#c0392b;font-weight:normal;font-size:14px;min-height:20px;}
+.info-text{font-size:13px;line-height:1.6;color:#333;}
+</style>
+</head>
+<body>
+<h1>Лабораторная работа 1<br>Вариант 8: RGB ↔ XYZ ↔ HSV</h1>
+
+<div class="panel">
+    <div class="flex-row">
+        <div>
+            <h3>Предпросмотр цвета</h3>
+            <div id="colorPreview"></div>
+            <input type="color" id="colorPicker">
+            <div id="warningBox"></div>
+        </div>
+
+        <!-- Блок RGB -->
+        <div class="model-block">
+            <h3>RGB (0‑255)</h3>
+            <div class="row">
+                <label>R:</label>
+                <input type="range" id="rSlider" min="0" max="255" value="128">
+                <input type="number" id="rInput" min="0" max="255" value="128">
+            </div>
+            <div class="row">
+                <label>G:</label>
+                <input type="range" id="gSlider" min="0" max="255" value="128">
+                <input type="number" id="gInput" min="0" max="255" value="128">
+            </div>
+            <div class="row">
+                <label>B:</label>
+                <input type="range" id="bSlider" min="0" max="255" value="128">
+                <input type="number" id="bInput" min="0" max="255" value="128">
+            </div>
+        </div>
+
+        <!-- Блок XYZ -->
+        <div class="model-block">
+            <h3>XYZ</h3>
+            <div class="row">
+                <label>X:</label>
+                <input type="range" id="xSlider" min="0" max="0.9505" step="0.001" value="0.3">
+                <input type="number" id="xInput" step="0.001" value="0.3">
+            </div>
+            <div class="row">
+                <label>Y:</label>
+                <input type="range" id="ySlider" min="0" max="1.0" step="0.001" value="0.3">
+                <input type="number" id="yInput" step="0.001" value="0.3">
+            </div>
+            <div class="row">
+                <label>Z:</label>
+                <input type="range" id="zSlider" min="0" max="1.0888" step="0.001" value="0.3">
+                <input type="number" id="zInput" step="0.001" value="0.3">
+            </div>
+        </div>
+
+        <!-- Блок HSV -->
+        <div class="model-block">
+            <h3>HSV</h3>
+            <div class="row">
+                <label>H:</label>
+                <input type="range" id="hSlider" min="0" max="360" value="180">
+                <input type="number" id="hInput" min="0" max="360" value="180">
+            </div>
+            <div class="row">
+                <label>S:</label>
+                <input type="range" id="sSlider" min="0" max="100" value="50">
+                <input type="number" id="sInput" min="0" max="100" value="50">
+            </div>
+            <div class="row">
+                <label>V:</label>
+                <input type="range" id="vSlider" min="0" max="100" value="50">
+                <input type="number" id="vInput" min="0" max="100" value="50">
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="panel">
+<h3>📄 Сопроводительная документация</h3>
+<div class="info-text">
+<p><b>Цель работы:</b> изучение цветовых моделей RGB, XYZ, HSV и взаимных преобразований между ними.</p>
+<p><b>Способы задания цвета:</b></p>
+<ul>
+<li>Цветовой пикер (палитра) — выбор цвета визуально;</li>
+<li>Ползунки — плавное изменение каждой компоненты;</li>
+<li>Поля числового ввода — точное задание значений компонент.</li>
+</ul>
+<p>При изменении любой компоненты одной модели автоматически пересчитываются значения двух остальных моделей.<br>
+При выходе рассчитанных параметров за допустимые границы выводится предупреждение об обрезании значений.</p>
+<p><b>Используемые формулы:</b> стандартные преобразования sRGB ↔ XYZ (стандарт наблюдателя 2°, точка белого D65), RGB ↔ HSV.</p>
+<p><b>Сдаваемые материалы:</b> веб‑приложение (данный файл index.html), исходный код, сопроводительная документация.</p>
+</div>
+</div>
+
+<script>
+// Элементы
+const colorPreview = document.getElementById('colorPreview');
+const colorPicker = document.getElementById('colorPicker');
+const warningBox = document.getElementById('warningBox');
+
+// RGB
+const rSlider = document.getElementById('rSlider'), rInput = document.getElementById('rInput');
+const gSlider = document.getElementById('gSlider'), gInput = document.getElementById('gInput');
+const bSlider = document.getElementById('bSlider'), bInput = document.getElementById('bInput');
+
+// XYZ
+const xSlider = document.getElementById('xSlider'), xInput = document.getElementById('xInput');
+const ySlider = document.getElementById('ySlider'), yInput = document.getElementById('yInput');
+const zSlider = document.getElementById('zSlider'), zInput = document.getElementById('zInput');
+
+// HSV
+const hSlider = document.getElementById('hSlider'), hInput = document.getElementById('hInput');
+const sSlider = document.getElementById('sSlider'), sInput = document.getElementById('sInput');
+const vSlider = document.getElementById('vSlider'), vInput = document.getElementById('vInput');
+
+let lock = false;
+
+// Установить предупреждение
+function setWarning(msg){
+    warningBox.textContent = msg||"";
+}
+
+// синхрон слайдер <-> инпут число
+function linkSliderNumber(slider,input,cb){
+    slider.addEventListener('input',()=>{ input.value=slider.value; cb(); });
+    input.addEventListener('input',()=>{ slider.value=input.value; cb(); });
+}
+
+// ---------- Формулы преобразований sRGB <-> XYZ (D65 2°) ----------
+function srgbToLinear(v){
+    v = v/255.0;
+    return (v <= 0.04045) ? v/12.92 : Math.pow((v+0.055)/1.055,2.4);
+}
+function linearToSrgb(lin){
+    if(lin<=0) return 0;
+    if(lin>=1) return 1;
+    return lin <=0.0031308 ? 12.92*lin : 1.055*Math.pow(lin,1/2.4)-0.055;
+}
+
+// RGB(0‑255) → XYZ D65
+function rgbToXyz(r,g,b){
+    let rl = srgbToLinear(r);
+    let gl = srgbToLinear(g);
+    let bl = srgbToLinear(b);
+    const x = rl*0.4124564 + gl*0.3575761 + bl*0.1804375;
+    const y = rl*0.2126729 + gl*0.7151522 + bl*0.0721750;
+    const z = rl*0.0193339 + gl*0.1191920 + bl*0.9503041;
+    return {X:x,Y:y,Z:z};
+}
+
+// XYZ → RGB(0‑255), возвращает {r,g,b,clipped:булево}
+function xyzToRgb(X,Y,Z){
+    let rl =  3.2404542*X -1.5371385*Y -0.4985314*Z;
+    let gl = -0.9692660*X +1.8760108*Y +0.0415560*Z;
+    let bl =  0.0556434*X -0.2040259*Y +1.0572252*Z;
+    let clipped = false;
+    if(rl<0||rl>1||gl<0||gl>1||bl<0||bl>1) clipped=true;
+    rl = Math.max(0,Math.min(1,rl));
+    gl = Math.max(0,Math.min(1,gl));
+    bl = Math.max(0,Math.min(1,bl));
+    const r = Math.round(linearToSrgb(rl)*255);
+    const g = Math.round(linearToSrgb(gl)*255);
+    const b = Math.round(linearToSrgb(bl)*255);
+    return {r,g,b,clipped};
+}
+
+// RGB 0‑255 → HSV H[0‑360],S[0‑100],V[0‑100]
+function rgbToHsv(r,g,b){
+    r/=255;g/=255;b/=255;
+    let max=Math.max(r,g,b), min=Math.min(r,g,b);
+    let h=0,s=0,v=max;
+    let d=max-min;
+    if(max!==0) s=d/max;
+    if(max!==min){
+        switch(max){
+            case r: h= ((g-b)/d + (g<b?6:0))/6;break;
+            case g: h= ((b-r)/d +2)/6;break;
+            case b: h= ((r-g)/d +4)/6;break;
+        }
+    }
+    return {H:h*360, S:s*100, V:v*100};
+}
+
+// HSV → RGB 0‑255
+function hsvToRgb(h,s,v){
+    h/=360; s/=100; v/=100;
+    let r,g,b;
+    let i = Math.floor(h*6);
+    let f = h*6-i;
+    let p = v*(1-s);
+    let q = v*(1-f*s);
+    let t = v*(1-(1-f)*s);
+    switch(i%6){
+        case 0:r=v;g=t;b=p;break;
+        case1:r=q;g=v;b=p;break;
+        case2:r=p;g=v;b=t;break;
+        case3:r=p;g=q;b=v;break;
+        case4:r=t;g=p;b=v;break;
+        case5:r=v;g=p;b=q;break;
+    }
+    return {r:Math.round(r*255),g:Math.round(g*255),b:Math.round(b*255)};
+}
+
+// Обновить интерфейс по RGB
+function updateFromRgb(){
+    if(lock) return;
+    lock=true;
+    setWarning("");
+    const r = Number(rInput.value);
+    const g = Number(gInput.value);
+    const b = Number(bInput.value);
+    // превью
+    colorPreview.style.backgroundColor=`rgb(${r},${g},${b})`;
+    colorPicker.value = rgbToHex(r,g,b);
+    // пересчет XYZ
+    const xyz = rgbToXyz(r,g,b);
+    xInput.value = xyz.X.toFixed(4); xSlider.value=xyz.X;
+    yInput.value = xyz.Y.toFixed(4); ySlider.value=xyz.Y;
+    zInput.value = xyz.Z.toFixed(4); zSlider.value=xyz.Z;
+    // пересчет HSV
+    const hsv = rgbToHsv(r,g,b);
+    hInput.value = Math.round(hsv.H); hSlider.value=Math.round(hsv.H);
+    sInput.value = Math.round(hsv.S); sSlider.value=Math.round(hsv.S);
+    vInput.value = Math.round(hsv.V); vSlider.value=Math.round(hsv.V);
+    lock=false;
+}
+
+// Обновить интерфейс по XYZ
+function updateFromXyz(){
+    if(lock) return;
+    lock=true;
+    setWarning("");
+    const X = Number(xInput.value);
+    const Y = Number(yInput.value);
+    const Z = Number(zInput.value);
+    const res = xyzToRgb(X,Y,Z);
+    if(res.clipped){
+        setWarning("Предупреждение: значения обрезаны, выход за границы диапазона RGB");
+    }
+    rInput.value=res.r; rSlider.value=res.r;
+    gInput.value=res.g; gSlider.value=res.g;
+    bInput.value=res.b; bSlider.value=res.b;
+    colorPreview.style.backgroundColor=`rgb(${res.r},${res.g},${res.b})`;
+    colorPicker.value = rgbToHex(res.r,res.g,res.b);
+    const hsv = rgbToHsv(res.r,res.g,res.b);
+    hInput.value = Math.round(hsv.H); hSlider.value=Math.round(hsv.H);
+    sInput.value = Math.round(hsv.S); sSlider.value=Math.round(hsv.S);
+    vInput.value = Math.round(hsv.V); vSlider.value=Math.round(hsv.V);
+    lock=false;
+}
+
+// Обновить интерфейс по HSV
+function updateFromHsv(){
+    if(lock) return;
+    lock=true;
+    setWarning("");
+    const H=Number(hInput.value),S=Number(sInput.value),V=Number(vInput.value);
+    const res = hsvToRgb(H,S,V);
+    rInput.value=res.r; rSlider.value=res.r;
+    gInput.value=res.g; gSlider.value=res.g;
+    bInput.value=res.b; bSlider.value=res.b;
+    colorPreview.style.backgroundColor=`rgb(${res.r},${res.g},${res.b})`;
+    colorPicker.value = rgbToHex(res.r,res.g,res.b);
+    const xyz = rgbToXyz(res.r,res.g,res.b);
+    xInput.value = xyz.X.toFixed(4); xSlider.value=xyz.X;
+    yInput.value = xyz.Y.toFixed(4); ySlider.value=xyz.Y;
+    zInput.value = xyz.Z.toFixed(4); zSlider.value=xyz.Z;
+    lock=false;
+}
+
+function rgbToHex(r,g,b){
+    const toHex=x=>x.toString(16).padStart(2,'0');
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+// Цвет пикер событие
+colorPicker.addEventListener('input',()=>{
+    const hex = colorPicker.value;
+    const rr = parseInt(hex.substr(1,2),16);
+    const gg = parseInt(hex.substr(3,2),16);
+    const bb = parseInt(hex.substr(5,2),16);
+    rInput.value=rr;rSlider.value=rr;
+    gInput.value=gg;gSlider.value=gg;
+    bInput.value=bb;bSlider.value=bb;
+    updateFromRgb();
+});
+
+// Связать все элементы
+linkSliderNumber(rSlider,rInput,updateFromRgb);
+linkSliderNumber(gSlider,gInput,updateFromRgb);
+linkSliderNumber(bSlider,bInput,updateFromRgb);
+
+linkSliderNumber(xSlider,xInput,updateFromXyz);
+linkSliderNumber(ySlider,yInput,updateFromXyz);
+linkSliderNumber(zSlider,zInput,updateFromXyz);
+
+linkSliderNumber(hSlider,hInput,updateFromHsv);
+linkSliderNumber(sSlider,sInput,updateFromHsv);
+linkSliderNumber(vSlider,vInput,updateFromHsv);
+
+// инициализация
+updateFromRgb();
+</script>
+</body>
+</html>
